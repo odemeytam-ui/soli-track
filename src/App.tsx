@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import './App.css'
 
-type ActivityType = 'pee' | 'poop' | 'meal' | 'walk' | 'water'
+type ActivityType = 'pee' | 'poop' | 'meal' | 'water' | 'walk'  
 
 type Activity = {
   id: string
@@ -17,16 +17,16 @@ const activityLabels: Record<ActivityType, string> = {
   pee: 'Pee',
   poop: 'Poop',
   meal: 'Meal',
-  walk: 'Walk',
   water: 'Water',
+  walk: 'Walk',
 }
 
 const icons: Record<ActivityType, string> = {
   pee: '💧',
   poop: '💩',
   meal: '🥣',
-  walk: '🐾',
   water: '🥤',
+  walk: '🐾',
 }
 
 function formatTime(timestamp: number) {
@@ -125,7 +125,7 @@ export default function App() {
         <div className="brand">
           <div className="brand-icon">🐶</div>
           <div>
-            <h1>SoliTrack</h1>
+            <h1>Soli Track</h1>
             <p>Better care, together.</p>
           </div>
         </div>
@@ -318,7 +318,7 @@ export default function App() {
       </section>
 
       <footer className="app-footer">
-        <p>Made with ❤️ for your four-legged family member.</p>
+        <p>Made with ❤️ for our Soli.</p>
         <p>Demo version · Data is not shared between devices yet.</p>
       </footer>
     </main>
