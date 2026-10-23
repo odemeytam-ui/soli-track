@@ -26,7 +26,7 @@ const icons: Record<ActivityType, string> = {
   poop: '💩',
   meal: '🥣',
   walk: '🐾',
-  water: '💧',
+  water: '🥤',
 }
 
 function formatTime(timestamp: number) {
@@ -119,10 +119,6 @@ export default function App() {
     return date.toDateString() === now.toDateString()
   })
 
-  const walkMinutes = todayActivities
-    .filter((activity) => activity.type === 'walk')
-    .reduce((total, activity) => total + (activity.duration ?? 0), 0)
-
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -140,7 +136,7 @@ export default function App() {
       </header>
 
       <section className="welcome">
-        <p className="eyebrow">YOUR FAMILY'S DOG CARE</p>
+        <p className="eyebrow">SOLI'S DOG CARE</p>
         <h2>How's your best friend doing?</h2>
         <p className="subtitle">
           Every little detail helps everyone take better care.
@@ -152,17 +148,17 @@ export default function App() {
             value={person}
             onChange={(event) => setPerson(event.target.value)}
           >
-            <option>Me</option>
-            <option>Family member 2</option>
-            <option>Family member 3</option>
-            <option>Family member 4</option>
-            <option>Family member 5</option>
+            <option>אבא</option>
+            <option>אמא</option>
+            <option>אודם</option>
+            <option>אגמון</option>
+            <option>אוריה</option>
           </select>
         </label>
       </section>
 
       <section className="summary-grid" aria-label="Latest activities">
-        {(['pee', 'meal', 'walk', 'water'] as ActivityType[]).map((type) => {
+        {(['pee', 'poop', 'meal', 'walk', 'water'] as ActivityType[]).map((type) => {
           const activity = latest(type)
 
           return (
