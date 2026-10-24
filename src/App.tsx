@@ -919,6 +919,20 @@ function App() {
         </div>
       </header>
 
+      <label className="person-picker home-person-picker">
+        <span>Logged as</span>
+        <select
+          value={person}
+          onChange={(event) => setPerson(event.target.value)}
+        >
+          {people.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <nav className="tab-bar" aria-label="Main navigation">
         <button
           className={activeTab === 'home' ? 'tab active' : 'tab'}
@@ -958,20 +972,6 @@ function App() {
             <div>
               <p className="eyebrow">YOUR DAILY DASHBOARD</p>
               <h2>Hi, {person}! 🐶</h2>
-
-              <label className="person-picker home-person-picker">
-                <span>Logged as</span>
-                <select
-                  value={person}
-                  onChange={(event) => setPerson(event.target.value)}
-                >
-                  {people.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
 
               <p className="muted">Here’s how your day is going.</p>
             </div>
