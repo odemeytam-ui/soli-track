@@ -3,7 +3,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import './App.css'
 
 type ActivityType = 'pee' | 'poop' | 'meal' | 'water' | 'walk'
-type Tab = 'home' | 'calendar' | 'history' | 'photos'
+type Tab = 'home' | 'calendar' | 'insights' | 'photos' | 'settings'
 type MealSlot = 'breakfast' | 'lunch' | 'dinner'
 
 type Activity = {
@@ -42,7 +42,27 @@ const FOOD_GOAL = 375
 const PHOTO_DB_NAME = 'soli-track-photos'
 const PHOTO_STORE_NAME = 'photos'
 
-const PEOPLE = ['אבא', 'אמא', 'אודם', 'אגמון', 'אוריה']
+const DEFAULT_PEOPLE = ['אבא', 'אמא', 'אודם', 'אגמון', 'אוריה']
+const SETTINGS_STORAGE_KEY = 'soli-track-settings'
+const PEOPLE_STORAGE_KEY = 'soli-track-caregivers'
+type AppSettings = {
+  petName: string
+  age: string
+  weight: string
+  mealsPerDay: number
+  dailyFoodGoal: number
+  foodType: string
+  mealTimes: string[]
+}
+const DEFAULT_SETTINGS: AppSettings = {
+  petName: 'Soli',
+  age: '',
+  weight: '',
+  mealsPerDay: 3,
+  dailyFoodGoal: 375,
+  foodType: '',
+  mealTimes: ['08:00', '14:30', '19:30'],
+}
 
 const ACTIVITY_INFO: Record<ActivityType, { label: string; icon: string }> = {
   pee: { label: 'Pee', icon: '💧' },
@@ -281,7 +301,24 @@ function App() {
   const [medicalReports, setMedicalReports] =
     useState<MedicalReport[]>(loadMedicalReports)
   const [activeTab, setActiveTab] = useState<Tab>('home')
+  const [people, setPeople] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(PEOPLE_STORAGE_KEY) ?? 'null') ?? DEFAULT_PEOPLE
+    } catch {
+      return DEFAULT_PEOPLE
+    }
+  })
   const [person, setPerson] = useState('אודם')
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    try {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}') }
+    } catch {
+      return DEFAULT_SETTINGS
+    }
+  })
+  const [newCaregiver, setNewCaregiver] = useState('')
+  const [showCaregiverModal, setShowCaregiverModal] = useState(false)
+  const [showCelebrationPopup, setShowCelebrationPopup] = useState(false)
 
   const [mealGrams, setMealGrams] = useState('125')
   const [waterMl, setWaterMl] = useState('250')
@@ -328,6 +365,18 @@ function App() {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
+
+  useEffect(() => {
+    try { localStorage.setItem(PEOPLE_STORAGE_KEY, JSON.stringify(people)) } catch { console.error('Could not save caregivers.') }
+  }, [people])
+
+  useEffect(() => {
+    try { localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings)) } catch { console.error('Could not save settings.') }
+  }, [settings])
+
+  useEffect(() => {
+    if (people.length && !people.includes(person)) setPerson(people[0])
+  }, [people, person])
 
   useEffect(() => {
     try {
@@ -594,7 +643,7 @@ function App() {
 
   async function deletePhoto(photo: StoredPhoto) {
     const confirmed = window.confirm(
-      `Delete "${photo.name}" from Soli's gallery? This cannot be undone.`,
+      `Delete "${photo.name}" from ${(settings.petName || 'Soli')}'s gallery? This cannot be undone.`,
     )
     if (!confirmed) return
 
@@ -626,7 +675,8 @@ function App() {
     .filter((activity) => activity.type === 'meal')
     .reduce((sum, activity) => sum + (activity.amount ?? 0), 0)
 
-  const foodProgress = Math.min(100, (foodTotal / FOOD_GOAL) * 100)
+  const foodGoal = Math.max(1, Number(settings.dailyFoodGoal) || FOOD_GOAL)
+  const foodProgress = Math.min(100, (foodTotal / foodGoal) * 100)
 
   function getTotal(type: ActivityType, list: Activity[]) {
     const matching = list.filter((activity) => activity.type === type)
@@ -673,7 +723,12 @@ function App() {
   const currentDate = new Date(clockNow)
   const currentMinutes = currentDate.getHours() * 60 + currentDate.getMinutes()
 
-  const overdueMealSlots = MEAL_SLOTS.filter((slot) => {
+  const configuredMealSlots = MEAL_SLOTS.slice(0, Math.max(1, Math.min(3, settings.mealsPerDay))).map((slot, index) => {
+    const [hours, minutes] = (settings.mealTimes[index] ?? ['08:00', '14:30', '19:30'][index]).split(':').map(Number)
+    return { ...slot, deadline: (hours || 0) * 60 + (minutes || 0) }
+  })
+
+  const overdueMealSlots = configuredMealSlots.filter((slot) => {
     const reminderKey = `${today}:${slot.id}`
     return (
       currentMinutes >= slot.deadline &&
@@ -694,7 +749,7 @@ function App() {
       // Continue if localStorage is unavailable.
     }
 
-    const counts = PEOPLE.map((name) => ({
+    const counts = people.map((name) => ({
       name,
       count: activities.filter(
         (activity) =>
@@ -710,13 +765,14 @@ function App() {
       .map((entry) => entry.name)
 
     setCelebration({ date: day, winners, count: highest })
+    setShowCelebrationPopup(true)
 
     try {
       localStorage.setItem(CELEBRATION_STORAGE_KEY, day)
     } catch {
       // Celebration still works for this open session.
     }
-  }, [clockNow, activities])
+  }, [clockNow, activities, people])
 
   // Monday-first calendar.
   const firstDay = new Date(
@@ -821,39 +877,6 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="header-left">
-          <div className="plus-menu-wrap">
-            <button
-              className="plus-button"
-              type="button"
-              aria-label="Open create menu"
-              aria-expanded={showPlusMenu}
-              onClick={() => setShowPlusMenu((open) => !open)}
-            >
-              +
-            </button>
-
-            {showPlusMenu && (
-              <div className="plus-dropdown">
-                <button
-                  type="button"
-                  onClick={() => openActivityLogger()}
-                >
-                  <span>📝</span> Log an activity
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPlusMenu(false)
-                    setMedicalDate(dateKey(new Date()))
-                    setShowMedicalModal(true)
-                  }}
-                >
-                  <span>🩺</span> Log a medical report
-                </button>
-              </div>
-            )}
-          </div>
-
           <div className="brand">
             <div className="brand-icon">🐾</div>
             <div>
@@ -863,14 +886,37 @@ function App() {
           </div>
         </div>
 
-        <label className="person-picker">
-          <span>Logged by</span>
-          <select value={person} onChange={(event) => setPerson(event.target.value)}>
-            {PEOPLE.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </label>
+        <div className="plus-menu-wrap">
+          <button
+            className="plus-button"
+            type="button"
+            aria-label="Open create menu"
+            aria-expanded={showPlusMenu}
+            onClick={() => setShowPlusMenu((open) => !open)}
+          >
+            +
+          </button>
+          {showPlusMenu && (
+            <div className="plus-dropdown">
+              <button type="button" onClick={() => openActivityLogger()}>
+                <span>📝</span> Log an activity
+              </button>
+              <button type="button" onClick={() => {
+                setShowPlusMenu(false)
+                setMedicalDate(dateKey(new Date()))
+                setShowMedicalModal(true)
+              }}>
+                <span>🩺</span> Log a medical report
+              </button>
+              <button type="button" onClick={() => {
+                setShowPlusMenu(false)
+                setShowCaregiverModal(true)
+              }}>
+                <span>👥</span> Add or remove caregiver
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       <nav className="tab-bar" aria-label="Main navigation">
@@ -881,10 +927,10 @@ function App() {
           <span>🏠</span> Home
         </button>
         <button
-          className={activeTab === 'history' ? 'tab active' : 'tab'}
-          onClick={() => setActiveTab('history')}
+          className={activeTab === 'insights' ? 'tab active' : 'tab'}
+          onClick={() => setActiveTab('insights')}
         >
-          <span>📋</span> History
+          <span>📊</span> Insights
         </button>
         <button
           className={activeTab === 'photos' ? 'tab active' : 'tab'}
@@ -898,6 +944,12 @@ function App() {
         >
           <span>📅</span> Calendar
         </button>
+        <button
+          className={activeTab === 'settings' ? 'tab active' : 'tab'}
+          onClick={() => setActiveTab('settings')}
+        >
+          <span>⚙️</span> Settings
+        </button>
       </nav>
 
       {activeTab === 'home' && (
@@ -906,6 +958,21 @@ function App() {
             <div>
               <p className="eyebrow">YOUR DAILY DASHBOARD</p>
               <h2>Hi, {person}! 🐶</h2>
+
+              <label className="person-picker home-person-picker">
+                <span>Logged as</span>
+                <select
+                  value={person}
+                  onChange={(event) => setPerson(event.target.value)}
+                >
+                  {people.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <p className="muted">Here’s how your day is going.</p>
             </div>
             <div className="today-pill">
@@ -930,7 +997,7 @@ function App() {
               </h2>
               <p>
                 {celebration.count} activities logged today. Thank you for
-                taking such good care of Soli! 🐾
+                taking such good care of {settings.petName || 'Soli'}! 🐾
               </p>
             </section>
           )}
@@ -940,7 +1007,7 @@ function App() {
               <div className="section-heading">
                 <div>
                   <p className="eyebrow">MEAL REMINDERS</p>
-                  <h2>Have you fed Soli? 🍽️</h2>
+                  <h2>Have you fed {settings.petName || 'Soli'}? 🍽️</h2>
                 </div>
               </div>
               <div className="meal-reminder-list">
@@ -950,11 +1017,7 @@ function App() {
                       <strong>{slot.label}</strong>
                       <p>
                         Scheduled by{' '}
-                        {slot.deadline === 8 * 60
-                          ? '08:00'
-                          : slot.deadline === 14 * 60 + 30
-                            ? '14:30'
-                            : '19:30'}
+                        {settings.mealTimes[configuredMealSlots.findIndex((item) => item.id === slot.id)] ?? formatTime(new Date().setHours(Math.floor(slot.deadline / 60), slot.deadline % 60, 0, 0))}
                       </p>
                     </div>
                     <div className="meal-reminder-actions">
@@ -983,8 +1046,8 @@ function App() {
             <div className="food-goal-top">
               <div>
                 <p className="eyebrow">DAILY FOOD GOAL</p>
-                <h3>{foodTotal} / {FOOD_GOAL} g</h3>
-                <p className="muted">{Math.max(0, FOOD_GOAL - foodTotal)} g remaining</p>
+                <h3>{foodTotal} / {foodGoal} g</h3>
+                <p className="muted">{Math.max(0, foodGoal - foodTotal)} g remaining</p>
               </div>
               <div className="food-emoji">🍽️</div>
             </div>
@@ -1111,7 +1174,7 @@ function App() {
             <div className="section-heading">
               <div>
                 <p className="eyebrow">MEDICAL RECORDS</p>
-                <h2>Soli's medical reports 🩺</h2>
+                <h2>{settings.petName || 'Soli'}'s medical reports 🩺</h2>
               </div>
               <button
                 className="text-button"
@@ -1164,8 +1227,8 @@ function App() {
                 <p className="eyebrow">LATEST ENTRIES</p>
                 <h2>Recent activity</h2>
               </div>
-              <button className="text-button" onClick={() => setActiveTab('history')}>
-                See all →
+              <button className="text-button" onClick={() => setActiveTab('insights')}>
+                See insights →
               </button>
             </div>
             {activities.length === 0 ? (
@@ -1185,7 +1248,7 @@ function App() {
             <div>
               <p className="eyebrow">EXPLORE THE PAST</p>
               <h2>Activity calendar</h2>
-              <p className="muted">Select any date to see Soli's daily totals.</p>
+              <p className="muted">Select any date to see {settings.petName || 'Soli'}'s daily totals.</p>
             </div>
           </div>
 
@@ -1259,6 +1322,24 @@ function App() {
               </div>
             </div>
 
+            {(() => {
+              const dayCounts = people.map((name) => ({
+                name,
+                count: activities.filter((activity) => activity.person === name && dateKey(new Date(activity.time)) === selectedDate).length,
+              }))
+              const topCount = Math.max(0, ...dayCounts.map((item) => item.count))
+              const winners = dayCounts.filter((item) => item.count === topCount && topCount > 0).map((item) => item.name)
+              return winners.length > 0 ? (
+                <div className="calendar-winner-summary">
+                  <span className="winner-trophy">🏆</span>
+                  <div>
+                    <strong>{winners.length === 1 ? `${winners[0]} was the top caregiver` : `Top caregivers: ${winners.join(' & ')}`}</strong>
+                    <p>{topCount} activities logged on this day</p>
+                  </div>
+                </div>
+              ) : null
+            })()}
+
             <div className="totals-grid">
               {(['pee', 'poop', 'meal', 'water', 'walk'] as ActivityType[]).map((type) => (
                 <article className="total-card" key={type}>
@@ -1279,7 +1360,7 @@ function App() {
                   <div
                     className="progress-fill"
                     style={{
-                      width: `${Math.min(100, (getTotal('meal', selectedActivities) / FOOD_GOAL) * 100)}%`,
+                      width: `${Math.min(100, (getTotal('meal', selectedActivities) / foodGoal) * 100)}%`,
                     }}
                   />
                 </div>
@@ -1289,35 +1370,233 @@ function App() {
         </section>
       )}
 
-      {activeTab === 'history' && (
+      {activeTab === 'insights' && (
         <section className="page-content">
           <div className="page-heading">
             <div>
-              <p className="eyebrow">EVERYTHING IN ONE PLACE</p>
-              <h2>Activity history</h2>
-              <p className="muted">All of Soli's recorded activities, newest first.</p>
+              <p className="eyebrow">UNDERSTAND HER ROUTINE</p>
+              <h2>{settings.petName || 'Soli'}'s insights 📊</h2>
+              <p className="muted">Caregiver contributions, feeding consistency, activity trends, and health history.</p>
+            </div>
+          </div>
+
+          {(() => {
+            const days = Array.from({ length: 7 }, (_, index) => {
+              const date = new Date()
+              date.setDate(date.getDate() - (6 - index))
+              const key = dateKey(date)
+              const entries = activities.filter((activity) => dateKey(new Date(activity.time)) === key)
+              return { key, label: date.toLocaleDateString([], { weekday: 'short' }), entries }
+            })
+            const last7 = days.flatMap((day) => day.entries)
+            const caregiverTotals = people.map((name) => ({
+              name,
+              count: last7.filter((activity) => activity.person === name).length,
+            })).sort((a, b) => b.count - a.count)
+            const highestCaregiverCount = Math.max(0, ...caregiverTotals.map((item) => item.count))
+            const totalFood = last7.filter((activity) => activity.type === 'meal').reduce((sum, activity) => sum + (activity.amount ?? 0), 0)
+            const daysWithFood = days.filter((day) => day.entries.some((activity) => activity.type === 'meal')).length
+            const daysMeetingGoal = days.filter((day) => day.entries.filter((activity) => activity.type === 'meal').reduce((sum, activity) => sum + (activity.amount ?? 0), 0) >= foodGoal).length
+            const recentReports = [...medicalReports].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8)
+            const maxDailyCount = Math.max(1, ...days.map((day) => day.entries.length))
+            const activityTypes: ActivityType[] = ['pee', 'poop', 'meal', 'water', 'walk']
+            
+            return (
+              <>
+                <section className="content-card insights-card">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">CARE TEAM</p>
+                      <h2>Caregiver contributions</h2>
+                      <p className="muted">Activities logged over the last 7 days</p>
+                    </div>
+                  </div>
+                  {caregiverTotals.length === 0 || highestCaregiverCount === 0 ? (
+                    <p className="empty-state">Start logging activities to see each caregiver's contribution.</p>
+                  ) : caregiverTotals.map((item, index) => (
+                    <div className="caregiver-stat-row" key={item.name}>
+                      <div className="caregiver-stat-top">
+                        <span>{index === 0 && item.count > 0 ? '🏆 ' : ''}{item.name}</span>
+                        <strong>{item.count} {item.count === 1 ? 'activity' : 'activities'}</strong>
+                      </div>
+                      <div className="insight-progress-track">
+                        <div className="insight-progress-fill" style={{ width: `${(item.count / highestCaregiverCount) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </section>
+
+                <section className="content-card insights-card">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">NUTRITION</p>
+                      <h2>Feeding consistency</h2>
+                      <p className="muted">Based on the last 7 days of logged meals</p>
+                    </div>
+                  </div>
+                  <div className="insight-stats-grid">
+                    <article className="insight-stat">
+                      <span>🍽️</span>
+                      <strong>{Math.round(totalFood / 7)} g</strong>
+                      <small>Average food per day</small>
+                    </article>
+                    <article className="insight-stat">
+                      <span>📅</span>
+                      <strong>{daysWithFood}/7</strong>
+                      <small>Days with meals logged</small>
+                    </article>
+                    <article className="insight-stat">
+                      <span>🎯</span>
+                      <strong>{daysMeetingGoal}/7</strong>
+                      <small>Days reaching {foodGoal} g goal</small>
+                    </article>
+                  </div>
+                  <p className="insights-footnote">These statistics reflect only the information logged in Soli Track.</p>
+                </section>
+
+                <section className="content-card insights-card">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">DAILY PATTERNS</p>
+                      <h2>Activity trends</h2>
+                      <p className="muted">Total logged activities per day · last 7 days</p>
+                    </div>
+                  </div>
+                  <div className="activity-trend-chart">
+                    {days.map((day) => (
+                      <div className="trend-day" key={day.key} title={`${formatDate(day.key)}: ${day.entries.length} activities`}>
+                        <strong>{day.entries.length}</strong>
+                        <div className="trend-bar-track">
+                          <div className="trend-bar" style={{ height: `${Math.max(day.entries.length > 0 ? 8 : 0, (day.entries.length / maxDailyCount) * 100)}%` }} />
+                        </div>
+                        <span>{day.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="activity-breakdown">
+                    {activityTypes.map((type) => {
+                      const count = last7.filter((activity) => activity.type === type).length
+                      return (
+                        <div className="activity-breakdown-item" key={type}>
+                          <span>{ACTIVITY_INFO[type].icon} {ACTIVITY_INFO[type].label}</span>
+                          <strong>{count}</strong>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+
+                <section className="content-card insights-card">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">HEALTH HISTORY</p>
+                      <h2>Medical reports</h2>
+                      <p className="muted">{medicalReports.length} saved {medicalReports.length === 1 ? 'report' : 'reports'}</p>
+                    </div>
+                    <button className="text-button" type="button" onClick={() => { setMedicalDate(dateKey(new Date())); setShowMedicalModal(true) }}>Add report +</button>
+                  </div>
+                  {recentReports.length === 0 ? (
+                    <p className="empty-state">No medical reports yet. Add vet visits, medications, vaccinations, or test results here.</p>
+                  ) : (
+                    <div className="medical-report-list">
+                      {recentReports.map((report) => (
+                        <article className="medical-report-row" key={report.id}>
+                          <div className="medical-report-icon">🩺</div>
+                          <div className="medical-report-info">
+                            <h3>{report.title}</h3>
+                            <p>{report.category} · {formatDate(report.date)} · Logged by {report.person}</p>
+                            {report.notes && <p className="medical-report-notes">{report.notes}</p>}
+                          </div>
+                          <button type="button" className="delete-report-button" onClick={() => deleteMedicalReport(report)} aria-label={`Delete ${report.title}`}>🗑️</button>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="content-card insights-card">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">RECENT LOGS</p>
+                      <h2>Latest activity</h2>
+                    </div>
+                  </div>
+                  {sortedAllActivities.length === 0 ? (
+                    <p className="empty-state">No activities logged yet.</p>
+                  ) : (
+                    <div className="activity-list">{sortedAllActivities.slice(0, 10).map(renderActivityRow)}</div>
+                  )}
+                </section>
+              </>
+            )
+          })()}
+        </section>
+      )}
+
+      {activeTab === 'settings' && (
+        <section className="page-content">
+          <div className="page-heading">
+            <div>
+              <p className="eyebrow">MAKE IT YOURS</p>
+              <h2>Settings ⚙️</h2>
+              <p className="muted">Configure your pet's profile, feeding plan, and care team.</p>
             </div>
           </div>
 
           <section className="content-card">
             <div className="section-heading">
-              <div>
-                <h2>All entries</h2>
-                <p className="muted">{activities.length} total entries</p>
-              </div>
+              <div><p className="eyebrow">PET PROFILE</p><h2>About {settings.petName || 'your pet'}</h2></div>
             </div>
-            {sortedAllActivities.length === 0 ? (
-              <p className="empty-state">Nothing here yet. Activities you log will appear here.</p>
-            ) : (
-              <div className="activity-list">
-                {sortedAllActivities.map((activity) => (
-                  <div key={activity.id}>
-                    <p className="history-date">{formatDate(dateKey(new Date(activity.time)))}</p>
-                    {renderActivityRow(activity)}
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="settings-grid">
+              <label>Pet name
+                <input value={settings.petName} onChange={(event) => setSettings((previous) => ({ ...previous, petName: event.target.value }))} placeholder="Soli" />
+              </label>
+              <label>Age
+                <input value={settings.age} onChange={(event) => setSettings((previous) => ({ ...previous, age: event.target.value }))} placeholder="e.g. 2 years" />
+              </label>
+              <label>Weight
+                <input value={settings.weight} onChange={(event) => setSettings((previous) => ({ ...previous, weight: event.target.value }))} placeholder="e.g. 18 kg" />
+              </label>
+              <label>Food type
+                <input value={settings.foodType} onChange={(event) => setSettings((previous) => ({ ...previous, foodType: event.target.value }))} placeholder="Brand or food type" />
+              </label>
+            </div>
+          </section>
+
+          <section className="content-card">
+            <div className="section-heading">
+              <div><p className="eyebrow">FEEDING PLAN</p><h2>Daily meals</h2></div>
+            </div>
+            <div className="settings-grid">
+              <label>Meals per day
+                <select value={settings.mealsPerDay} onChange={(event) => setSettings((previous) => ({ ...previous, mealsPerDay: Number(event.target.value) }))}>
+                  <option value={1}>1 meal</option><option value={2}>2 meals</option><option value={3}>3 meals</option>
+                </select>
+              </label>
+              <label>Daily food goal (grams)
+                <input type="number" min="1" value={settings.dailyFoodGoal} onChange={(event) => setSettings((previous) => ({ ...previous, dailyFoodGoal: Math.max(1, Number(event.target.value) || 1) }))} />
+              </label>
+              {Array.from({ length: settings.mealsPerDay }, (_, index) => (
+                <label key={index}>{['Breakfast', 'Lunch', 'Dinner'][index]} time
+                  <input type="time" value={settings.mealTimes[index] ?? ['08:00', '14:30', '19:30'][index]} onChange={(event) => setSettings((previous) => {
+                    const mealTimes = [...previous.mealTimes]
+                    mealTimes[index] = event.target.value
+                    return { ...previous, mealTimes }
+                  })} />
+                </label>
+              ))}
+            </div>
+            <p className="settings-note">Your settings are saved automatically in this browser.</p>
+          </section>
+
+          <section className="content-card">
+            <div className="section-heading">
+              <div><p className="eyebrow">CARE TEAM</p><h2>Caregivers</h2></div>
+              <button className="text-button" type="button" onClick={() => setShowCaregiverModal(true)}>Manage caregivers +</button>
+            </div>
+            <div className="caregiver-chip-list">
+              {people.map((name) => <span className="caregiver-chip" key={name}>{name}</span>)}
+            </div>
           </section>
         </section>
       )}
@@ -1556,7 +1835,55 @@ function App() {
         </div>
       )}
 
-      <footer className="app-footer">Made with ❤️ for Soli</footer>
+      {showCaregiverModal && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCaregiverModal(false) }}>
+          <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="caregiver-modal-title">
+            <div className="modal-heading">
+              <div><p className="eyebrow">THE CARE TEAM</p><h2 id="caregiver-modal-title">Manage caregivers</h2></div>
+              <button className="modal-close" type="button" onClick={() => setShowCaregiverModal(false)} aria-label="Close">×</button>
+            </div>
+            <form className="modal-form" onSubmit={(event) => {
+              event.preventDefault()
+              const name = newCaregiver.trim()
+              if (!name || people.some((personName) => personName.toLowerCase() === name.toLowerCase())) return
+              setPeople((previous) => [...previous, name])
+              setNewCaregiver('')
+            }}>
+              <label>Add caregiver
+                <input value={newCaregiver} onChange={(event) => setNewCaregiver(event.target.value)} placeholder="Enter caregiver name" />
+              </label>
+              <button type="submit" className="primary-button">Add caregiver</button>
+            </form>
+            <div className="caregiver-manage-list">
+              {people.map((name) => (
+                <div className="caregiver-manage-row" key={name}>
+                  <span>👤 {name}</span>
+                  <button type="button" className="delete-report-button" disabled={people.length <= 1} onClick={() => {
+                    if (window.confirm(`Remove ${name} from the caregiver list? Existing activity records will remain.`)) {
+                      setPeople((previous) => previous.filter((item) => item !== name))
+                    }
+                  }} aria-label={`Remove ${name}`} title={people.length <= 1 ? 'At least one caregiver is required' : `Remove ${name}`}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {showCelebrationPopup && celebration?.date === today && (
+        <div className="modal-backdrop celebration-backdrop" role="presentation">
+          <section className="celebration-popup" role="dialog" aria-modal="true" aria-labelledby="celebration-title">
+            <div className="celebration-confetti" aria-hidden="true">🎉 ✨ 🎊 ✨ 🎉</div>
+            <div className="celebration-paw">🏆</div>
+            <p className="eyebrow">TEAM SOLI · DAILY CELEBRATION</p>
+            <h2 id="celebration-title">{celebration.winners.length === 1 ? `Amazing work, ${celebration.winners[0]}!` : `Amazing work, ${celebration.winners.join(' & ')}!`}</h2>
+            <p>{celebration.count} activities logged today. Thank you for taking such good care of {settings.petName || 'Soli'}! 🐾</p>
+            <button className="primary-button" type="button" onClick={() => setShowCelebrationPopup(false)}>Celebrate!</button>
+          </section>
+        </div>
+      )}
+
+      <footer className="app-footer">Made with ❤️ for {settings.petName || 'Soli'}</footer>
     </main>
   )
 }
