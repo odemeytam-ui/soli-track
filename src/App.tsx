@@ -1,10 +1,10 @@
-
 import { useEffect, useState } from 'react'
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import './App.css'
 
 type ActivityType = 'pee' | 'poop' | 'meal' | 'water' | 'walk'
 type Tab = 'home' | 'calendar' | 'history' | 'photos'
+type MealSlot = 'breakfast' | 'lunch' | 'dinner'
 
 type Activity = {
   id: string
@@ -13,6 +13,8 @@ type Activity = {
   person: string
   amount?: number
   duration?: number
+  notes?: string
+  mealSlot?: MealSlot
 }
 
 type StoredPhoto = {
@@ -22,23 +24,44 @@ type StoredPhoto = {
   blob: Blob
 }
 
+type MedicalReport = {
+  id: string
+  title: string
+  category: string
+  date: string
+  notes: string
+  person: string
+  createdAt: number
+}
+
 const STORAGE_KEY = 'soli-track-activities'
+const MEDICAL_STORAGE_KEY = 'soli-track-medical-reports'
+const REMINDER_STORAGE_KEY = 'soli-track-dismissed-meal-reminders'
+const CELEBRATION_STORAGE_KEY = 'soli-track-daily-celebration'
 const FOOD_GOAL = 375
 const PHOTO_DB_NAME = 'soli-track-photos'
 const PHOTO_STORE_NAME = 'photos'
 
 const PEOPLE = ['אבא', 'אמא', 'אודם', 'אגמון', 'אוריה']
 
-const ACTIVITY_INFO: Record<
-  ActivityType,
-  { label: string; icon: string }
-> = {
+const ACTIVITY_INFO: Record<ActivityType, { label: string; icon: string }> = {
   pee: { label: 'Pee', icon: '💧' },
   poop: { label: 'Poop', icon: '💩' },
   meal: { label: 'Food', icon: '🍽️' },
   water: { label: 'Water', icon: '🚰' },
   walk: { label: 'Walk', icon: '🐕' },
 }
+
+const MEAL_SLOTS: {
+  id: MealSlot
+  label: string
+  deadline: number
+  defaultAmount: number
+}[] = [
+  { id: 'breakfast', label: 'Breakfast', deadline: 8 * 60, defaultAmount: 125 },
+  { id: 'lunch', label: 'Lunch', deadline: 14 * 60 + 30, defaultAmount: 125 },
+  { id: 'dinner', label: 'Dinner', deadline: 19 * 60 + 30, defaultAmount: 125 },
+]
 
 function dateKey(date: Date): string {
   const year = date.getFullYear()
@@ -75,10 +98,45 @@ function formatDuration(minutes: number): string {
   return remaining ? `${hours}h ${remaining}m` : `${hours}h`
 }
 
+function toLocalDateTimeValue(timestamp: number): string {
+  const date = new Date(timestamp)
+  const offset = date.getTimezoneOffset()
+  return new Date(date.getTime() - offset * 60000)
+    .toISOString()
+    .slice(0, 16)
+}
+
+function getMealSlotForTime(timestamp: number): MealSlot {
+  const date = new Date(timestamp)
+  const minutes = date.getHours() * 60 + date.getMinutes()
+  if (minutes < 11 * 60) return 'breakfast'
+  if (minutes < 17 * 60) return 'lunch'
+  return 'dinner'
+}
+
 function loadActivities(): Activity[] {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
     return saved ? (JSON.parse(saved) as Activity[]) : []
+  } catch {
+    return []
+  }
+}
+
+function loadMedicalReports(): MedicalReport[] {
+  try {
+    const saved = localStorage.getItem(MEDICAL_STORAGE_KEY)
+    return saved ? (JSON.parse(saved) as MedicalReport[]) : []
+  } catch {
+    return []
+  }
+}
+
+function loadDismissedReminders(): string[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(REMINDER_STORAGE_KEY) ?? '[]',
+    ) as string[]
   } catch {
     return []
   }
@@ -97,11 +155,8 @@ function openPhotoDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const database = request.result
-
       if (!database.objectStoreNames.contains(PHOTO_STORE_NAME)) {
-        database.createObjectStore(PHOTO_STORE_NAME, {
-          keyPath: 'id',
-        })
+        database.createObjectStore(PHOTO_STORE_NAME, { keyPath: 'id' })
       }
     }
 
@@ -116,19 +171,14 @@ async function getSavedPhotos(): Promise<StoredPhoto[]> {
 
   try {
     return await new Promise((resolve, reject) => {
-      const transaction = database.transaction(
-        PHOTO_STORE_NAME,
-        'readonly',
-      )
-      const request = transaction
-        .objectStore(PHOTO_STORE_NAME)
-        .getAll()
+      const transaction = database.transaction(PHOTO_STORE_NAME, 'readonly')
+      const request = transaction.objectStore(PHOTO_STORE_NAME).getAll()
 
       request.onsuccess = () => {
-        const photos = (request.result as StoredPhoto[]).sort(
+        const saved = (request.result as StoredPhoto[]).sort(
           (a, b) => b.time - a.time,
         )
-        resolve(photos)
+        resolve(saved)
       }
 
       request.onerror = () =>
@@ -144,13 +194,8 @@ async function savePhoto(photo: StoredPhoto): Promise<void> {
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(
-        PHOTO_STORE_NAME,
-        'readwrite',
-      )
-
+      const transaction = database.transaction(PHOTO_STORE_NAME, 'readwrite')
       transaction.objectStore(PHOTO_STORE_NAME).add(photo)
-
       transaction.oncomplete = () => resolve()
       transaction.onerror = () =>
         reject(transaction.error ?? new Error('Could not save photo.'))
@@ -167,13 +212,8 @@ async function removeSavedPhoto(id: string): Promise<void> {
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(
-        PHOTO_STORE_NAME,
-        'readwrite',
-      )
-
+      const transaction = database.transaction(PHOTO_STORE_NAME, 'readwrite')
       transaction.objectStore(PHOTO_STORE_NAME).delete(id)
-
       transaction.oncomplete = () => resolve()
       transaction.onerror = () =>
         reject(transaction.error ?? new Error('Could not delete photo.'))
@@ -197,7 +237,6 @@ function PhotoCard({
   useEffect(() => {
     const url = URL.createObjectURL(photo.blob)
     setImageUrl(url)
-
     return () => URL.revokeObjectURL(url)
   }, [photo.blob])
 
@@ -217,9 +256,7 @@ function PhotoCard({
       )}
 
       <div className="photo-card-info">
-        <p className="photo-name" title={photo.name}>
-          {photo.name}
-        </p>
+        <p className="photo-name" title={photo.name}>{photo.name}</p>
         <p className="photo-date">
           {new Date(photo.time).toLocaleDateString([], {
             day: 'numeric',
@@ -227,7 +264,6 @@ function PhotoCard({
             year: 'numeric',
           })}
         </p>
-
         <button
           className="delete-photo-button"
           type="button"
@@ -242,6 +278,8 @@ function PhotoCard({
 
 function App() {
   const [activities, setActivities] = useState<Activity[]>(loadActivities)
+  const [medicalReports, setMedicalReports] =
+    useState<MedicalReport[]>(loadMedicalReports)
   const [activeTab, setActiveTab] = useState<Tab>('home')
   const [person, setPerson] = useState('אודם')
 
@@ -255,6 +293,34 @@ function App() {
   const [photosLoading, setPhotosLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [photoError, setPhotoError] = useState('')
+
+  // New: plus menu, manual activity form and medical report form.
+  const [showPlusMenu, setShowPlusMenu] = useState(false)
+  const [showActivityModal, setShowActivityModal] = useState(false)
+  const [showMedicalModal, setShowMedicalModal] = useState(false)
+  const [manualType, setManualType] = useState<ActivityType>('pee')
+  const [manualTime, setManualTime] = useState(() =>
+    toLocalDateTimeValue(Date.now()),
+  )
+  const [manualAmount, setManualAmount] = useState('125')
+  const [manualDuration, setManualDuration] = useState('30')
+  const [manualNotes, setManualNotes] = useState('')
+  const [manualMealSlot, setManualMealSlot] =
+    useState<MealSlot>('breakfast')
+
+  const [medicalTitle, setMedicalTitle] = useState('')
+  const [medicalCategory, setMedicalCategory] = useState('Vet visit')
+  const [medicalDate, setMedicalDate] = useState(dateKey(new Date()))
+  const [medicalNotes, setMedicalNotes] = useState('')
+
+  const [dismissedReminders, setDismissedReminders] =
+    useState<string[]>(loadDismissedReminders)
+  const [clockNow, setClockNow] = useState(Date.now())
+  const [celebration, setCelebration] = useState<{
+    date: string
+    winners: string[]
+    count: number
+  } | null>(null)
 
   const today = dateKey(new Date())
   const [selectedDate, setSelectedDate] = useState(today)
@@ -272,6 +338,28 @@ function App() {
   }, [activities])
 
   useEffect(() => {
+    try {
+      localStorage.setItem(
+        MEDICAL_STORAGE_KEY,
+        JSON.stringify(medicalReports),
+      )
+    } catch {
+      console.error('Could not save Soli Track medical reports.')
+    }
+  }, [medicalReports])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        REMINDER_STORAGE_KEY,
+        JSON.stringify(dismissedReminders),
+      )
+    } catch {
+      console.error('Could not save reminder settings.')
+    }
+  }, [dismissedReminders])
+
+  useEffect(() => {
     let cancelled = false
 
     getSavedPhotos()
@@ -284,9 +372,7 @@ function App() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setPhotoError(
-            error instanceof Error
-              ? error.message
-              : 'Could not load photos.',
+            error instanceof Error ? error.message : 'Could not load photos.',
           )
         }
       })
@@ -299,9 +385,21 @@ function App() {
     }
   }, [])
 
+  // Update the clock while the app is open, so reminders and the
+  // end-of-day celebration can activate without refreshing the page.
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 15000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   function logActivity(
     type: ActivityType,
-    extra: { amount?: number; duration?: number } = {},
+    extra: {
+      amount?: number
+      duration?: number
+      notes?: string
+      mealSlot?: MealSlot
+    } = {},
     timestamp = Date.now(),
   ) {
     const activity: Activity = {
@@ -315,11 +413,32 @@ function App() {
     setActivities((previous) => [activity, ...previous])
   }
 
+  function openActivityLogger(
+    type: ActivityType = 'pee',
+    slot?: MealSlot,
+  ) {
+    setManualType(type)
+    setManualTime(toLocalDateTimeValue(Date.now()))
+    setManualAmount(
+      type === 'water' ? '250' : type === 'meal' ? '125' : '',
+    )
+    setManualDuration('30')
+    setManualNotes('')
+    if (slot) setManualMealSlot(slot)
+    else setManualMealSlot(getMealSlotForTime(Date.now()))
+    setShowPlusMenu(false)
+    setShowActivityModal(true)
+  }
+
   function logMeal() {
     const amount = Number(mealGrams)
     if (!Number.isFinite(amount) || amount <= 0) return
 
-    logActivity('meal', { amount })
+    const timestamp = Date.now()
+    logActivity('meal', {
+      amount,
+      mealSlot: getMealSlotForTime(timestamp),
+    }, timestamp)
     setShowMealInput(false)
     setMealGrams('125')
   }
@@ -328,7 +447,10 @@ function App() {
     const amount = Number(waterMl)
     if (!Number.isFinite(amount) || amount <= 0) return
 
-    logActivity('water', { amount })
+    logActivity('water', {
+      amount,
+      notes: `${amount} ml of water given`,
+    })
     setShowWaterInput(false)
     setWaterMl('250')
   }
@@ -340,18 +462,90 @@ function App() {
       1,
       Math.round((Date.now() - walkStarted) / 60000),
     )
-
     logActivity('walk', { duration }, walkStarted)
     setWalkStarted(null)
   }
 
-  async function handlePhotoUpload(
-    event: ChangeEvent<HTMLInputElement>,
-  ) {
+  function saveManualActivity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const timestamp = new Date(manualTime).getTime()
+    if (!Number.isFinite(timestamp)) return
+
+    const extra: {
+      amount?: number
+      duration?: number
+      notes?: string
+      mealSlot?: MealSlot
+    } = {}
+
+    if (manualType === 'meal' || manualType === 'water') {
+      const amount = Number(manualAmount)
+      if (!Number.isFinite(amount) || amount <= 0) return
+      extra.amount = amount
+    }
+
+    if (manualType === 'walk') {
+      const duration = Number(manualDuration)
+      if (!Number.isFinite(duration) || duration <= 0) return
+      extra.duration = duration
+    }
+
+    if (manualNotes.trim()) extra.notes = manualNotes.trim()
+
+    if (manualType === 'meal') {
+      extra.mealSlot = manualMealSlot
+    }
+
+    logActivity(manualType, extra, timestamp)
+    setShowActivityModal(false)
+  }
+
+  function saveMedicalReport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!medicalTitle.trim() || !medicalDate) return
+
+    const report: MedicalReport = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      title: medicalTitle.trim(),
+      category: medicalCategory,
+      date: medicalDate,
+      notes: medicalNotes.trim(),
+      person,
+      createdAt: Date.now(),
+    }
+
+    setMedicalReports((previous) =>
+      [report, ...previous].sort((a, b) => b.date.localeCompare(a.date)),
+    )
+    setMedicalTitle('')
+    setMedicalCategory('Vet visit')
+    setMedicalDate(dateKey(new Date()))
+    setMedicalNotes('')
+    setShowMedicalModal(false)
+  }
+
+  function deleteMedicalReport(report: MedicalReport) {
+    const confirmed = window.confirm(
+      `Delete the medical report "${report.title}"? This cannot be undone.`,
+    )
+    if (!confirmed) return
+    setMedicalReports((previous) =>
+      previous.filter((item) => item.id !== report.id),
+    )
+  }
+
+  function dismissMealReminder(slot: MealSlot) {
+    setDismissedReminders((previous) => {
+      const key = `${today}:${slot}`
+      return previous.includes(key) ? previous : [...previous, key]
+    })
+  }
+
+  async function handlePhotoUpload(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget
     const files = Array.from(input.files ?? [])
     input.value = ''
-
     if (files.length === 0) return
 
     setUploading(true)
@@ -388,7 +582,6 @@ function App() {
           : 'Could not save the selected photos.',
       )
 
-      // Reload the gallery in case some files were saved before an error.
       try {
         setPhotos(await getSavedPhotos())
       } catch {
@@ -403,7 +596,6 @@ function App() {
     const confirmed = window.confirm(
       `Delete "${photo.name}" from Soli's gallery? This cannot be undone.`,
     )
-
     if (!confirmed) return
 
     setPhotoError('')
@@ -440,17 +632,11 @@ function App() {
     const matching = list.filter((activity) => activity.type === type)
 
     if (type === 'meal' || type === 'water') {
-      return matching.reduce(
-        (sum, activity) => sum + (activity.amount ?? 0),
-        0,
-      )
+      return matching.reduce((sum, activity) => sum + (activity.amount ?? 0), 0)
     }
 
     if (type === 'walk') {
-      return matching.reduce(
-        (sum, activity) => sum + (activity.duration ?? 0),
-        0,
-      )
+      return matching.reduce((sum, activity) => sum + (activity.duration ?? 0), 0)
     }
 
     return matching.length
@@ -458,7 +644,6 @@ function App() {
 
   function getTotalLabel(type: ActivityType, list: Activity[]) {
     const total = getTotal(type, list)
-
     if (type === 'meal') return `${total} g`
     if (type === 'water') return `${total} ml`
     if (type === 'walk') return formatDuration(total)
@@ -471,18 +656,67 @@ function App() {
       .sort((a, b) => b.time - a.time)[0]
   }
 
-  const sortedSelectedActivities = [...selectedActivities].sort(
-    (a, b) => b.time - a.time,
-  )
-
-  const sortedAllActivities = [...activities].sort(
-    (a, b) => b.time - a.time,
-  )
-
+  const sortedAllActivities = [...activities].sort((a, b) => b.time - a.time)
   const monthYear = visibleMonth.toLocaleDateString([], {
     month: 'long',
     year: 'numeric',
   })
+
+  // Meal slot detection supports older meal entries that don't have mealSlot.
+  function hasLoggedMealSlot(slot: MealSlot) {
+    return todayActivities.some((activity) => {
+      if (activity.type !== 'meal') return false
+      return (activity.mealSlot ?? getMealSlotForTime(activity.time)) === slot
+    })
+  }
+
+  const currentDate = new Date(clockNow)
+  const currentMinutes = currentDate.getHours() * 60 + currentDate.getMinutes()
+
+  const overdueMealSlots = MEAL_SLOTS.filter((slot) => {
+    const reminderKey = `${today}:${slot.id}`
+    return (
+      currentMinutes >= slot.deadline &&
+      !hasLoggedMealSlot(slot.id) &&
+      !dismissedReminders.includes(reminderKey)
+    )
+  })
+
+  // At 23:00, calculate who logged the most activities today.
+  useEffect(() => {
+    const now = new Date(clockNow)
+    if (now.getHours() < 23) return
+
+    const day = dateKey(now)
+    try {
+      if (localStorage.getItem(CELEBRATION_STORAGE_KEY) === day) return
+    } catch {
+      // Continue if localStorage is unavailable.
+    }
+
+    const counts = PEOPLE.map((name) => ({
+      name,
+      count: activities.filter(
+        (activity) =>
+          activity.person === name &&
+          dateKey(new Date(activity.time)) === day,
+      ).length,
+    }))
+    const highest = Math.max(...counts.map((entry) => entry.count))
+    if (highest === 0) return
+
+    const winners = counts
+      .filter((entry) => entry.count === highest)
+      .map((entry) => entry.name)
+
+    setCelebration({ date: day, winners, count: highest })
+
+    try {
+      localStorage.setItem(CELEBRATION_STORAGE_KEY, day)
+    } catch {
+      // Celebration still works for this open session.
+    }
+  }, [clockNow, activities])
 
   // Monday-first calendar.
   const firstDay = new Date(
@@ -502,18 +736,15 @@ function App() {
     ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
   ]
 
-  while (calendarCells.length % 7 !== 0) {
-    calendarCells.push(null)
-  }
+  while (calendarCells.length % 7 !== 0) calendarCells.push(null)
 
   function changeMonth(amount: number) {
-    setVisibleMonth(
-      (previous) =>
-        new Date(
-          previous.getFullYear(),
-          previous.getMonth() + amount,
-          1,
-        ),
+    setVisibleMonth((previous) =>
+      new Date(
+        previous.getFullYear(),
+        previous.getMonth() + amount,
+        1,
+      ),
     )
   }
 
@@ -530,41 +761,36 @@ function App() {
     const info = ACTIVITY_INFO[activity.type]
     let detail = ''
 
-    if (activity.type === 'meal') {
-      detail = `${activity.amount ?? 0} g`
-    } else if (activity.type === 'water') {
-      detail = `${activity.amount ?? 0} ml`
-    } else if (activity.type === 'walk') {
+    if (activity.type === 'meal') detail = `${activity.amount ?? 0} g`
+    else if (activity.type === 'water') detail = `${activity.amount ?? 0} ml`
+    else if (activity.type === 'walk') {
       detail = formatDuration(activity.duration ?? 0)
     }
 
+    const mealLabel =
+      activity.type === 'meal' && activity.mealSlot
+        ? ` · ${MEAL_SLOTS.find((slot) => slot.id === activity.mealSlot)?.label ?? ''}`
+        : ''
+
     return (
       <article className="activity-row" key={activity.id}>
-        <div className={`activity-icon ${activity.type}`}>
-          {info.icon}
-        </div>
-
+        <div className={`activity-icon ${activity.type}`}>{info.icon}</div>
         <div className="activity-info">
           <h3>{info.label}</h3>
           <p>
             {formatTime(activity.time)}
             {detail ? ` · ${detail}` : ''}
+            {mealLabel}
+            {activity.notes ? ` · ${activity.notes}` : ''}
           </p>
         </div>
-
         <div className="activity-person">{activity.person}</div>
       </article>
     )
   }
 
   function renderDailySummary(list: Activity[]) {
-    const types: ActivityType[] = [
-      'pee',
-      'poop',
-      'meal',
-      'water',
-      'walk',
-    ]
+    const types: ActivityType[] = ['pee', 'poop', 'meal', 'water', 'walk']
 
     return (
       <div className="daily-summary">
@@ -576,17 +802,13 @@ function App() {
               <div className={`activity-icon ${type}`}>
                 {ACTIVITY_INFO[type].icon}
               </div>
-
               <div className="activity-info">
                 <h3>{ACTIVITY_INFO[type].label}</h3>
                 <p>{getTotalLabel(type, list)}</p>
               </div>
-
               <div className="last-recorded">
                 <span>Last recorded</span>
-                <strong>
-                  {latest ? formatTime(latest.time) : '—'}
-                </strong>
+                <strong>{latest ? formatTime(latest.time) : '—'}</strong>
               </div>
             </article>
           )
@@ -598,24 +820,54 @@ function App() {
   return (
     <main className="app-shell">
       <header className="app-header">
-        <div className="brand">
-          <div className="brand-icon">🐾</div>
-          <div>
-            <h1>Soli Track</h1>
-            <p>Your dog's daily care companion</p>
+        <div className="header-left">
+          <div className="plus-menu-wrap">
+            <button
+              className="plus-button"
+              type="button"
+              aria-label="Open create menu"
+              aria-expanded={showPlusMenu}
+              onClick={() => setShowPlusMenu((open) => !open)}
+            >
+              +
+            </button>
+
+            {showPlusMenu && (
+              <div className="plus-dropdown">
+                <button
+                  type="button"
+                  onClick={() => openActivityLogger()}
+                >
+                  <span>📝</span> Log an activity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPlusMenu(false)
+                    setMedicalDate(dateKey(new Date()))
+                    setShowMedicalModal(true)
+                  }}
+                >
+                  <span>🩺</span> Log a medical report
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="brand">
+            <div className="brand-icon">🐾</div>
+            <div>
+              <h1>Soli Track</h1>
+              <p>Your dog's daily care companion</p>
+            </div>
           </div>
         </div>
 
         <label className="person-picker">
           <span>Logged by</span>
-          <select
-            value={person}
-            onChange={(event) => setPerson(event.target.value)}
-          >
+          <select value={person} onChange={(event) => setPerson(event.target.value)}>
             {PEOPLE.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
+              <option key={name} value={name}>{name}</option>
             ))}
           </select>
         </label>
@@ -628,21 +880,18 @@ function App() {
         >
           <span>🏠</span> Home
         </button>
-
         <button
           className={activeTab === 'history' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('history')}
         >
           <span>📋</span> History
         </button>
-
         <button
           className={activeTab === 'photos' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('photos')}
         >
           <span>📷</span> Photos
         </button>
-
         <button
           className={activeTab === 'calendar' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('calendar')}
@@ -659,7 +908,6 @@ function App() {
               <h2>Hi, {person}! 🐶</h2>
               <p className="muted">Here’s how your day is going.</p>
             </div>
-
             <div className="today-pill">
               {new Date().toLocaleDateString([], {
                 weekday: 'short',
@@ -669,18 +917,77 @@ function App() {
             </div>
           </div>
 
+          {celebration?.date === today && (
+            <section className="celebration-card" aria-live="polite">
+              <div className="celebration-confetti" aria-hidden="true">
+                🎉 ✨ 🎊 ✨ 🎉
+              </div>
+              <p className="eyebrow">TEAM SOLI · DAILY CELEBRATION</p>
+              <h2>
+                {celebration.winners.length === 1
+                  ? `Amazing work, ${celebration.winners[0]}!`
+                  : `Amazing work, ${celebration.winners.join(' & ')}!`}
+              </h2>
+              <p>
+                {celebration.count} activities logged today. Thank you for
+                taking such good care of Soli! 🐾
+              </p>
+            </section>
+          )}
+
+          {overdueMealSlots.length > 0 && (
+            <section className="meal-reminders-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">MEAL REMINDERS</p>
+                  <h2>Have you fed Soli? 🍽️</h2>
+                </div>
+              </div>
+              <div className="meal-reminder-list">
+                {overdueMealSlots.map((slot) => (
+                  <div className="meal-reminder-row" key={slot.id}>
+                    <div>
+                      <strong>{slot.label}</strong>
+                      <p>
+                        Scheduled by{' '}
+                        {slot.deadline === 8 * 60
+                          ? '08:00'
+                          : slot.deadline === 14 * 60 + 30
+                            ? '14:30'
+                            : '19:30'}
+                      </p>
+                    </div>
+                    <div className="meal-reminder-actions">
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => openActivityLogger('meal', slot.id)}
+                      >
+                        Log meal
+                      </button>
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={() => dismissMealReminder(slot.id)}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="food-goal-card">
             <div className="food-goal-top">
               <div>
                 <p className="eyebrow">DAILY FOOD GOAL</p>
                 <h3>{foodTotal} / {FOOD_GOAL} g</h3>
-                <p className="muted">
-                  {Math.max(0, FOOD_GOAL - foodTotal)} g remaining
-                </p>
+                <p className="muted">{Math.max(0, FOOD_GOAL - foodTotal)} g remaining</p>
               </div>
               <div className="food-emoji">🍽️</div>
             </div>
-
             <div
               className="progress-track"
               role="progressbar"
@@ -688,15 +995,9 @@ function App() {
               aria-valuemin={0}
               aria-valuemax={100}
             >
-              <div
-                className="progress-fill"
-                style={{ width: `${foodProgress}%` }}
-              />
+              <div className="progress-fill" style={{ width: `${foodProgress}%` }} />
             </div>
-
-            <p className="progress-caption">
-              {Math.round(foodProgress)}% of daily goal
-            </p>
+            <p className="progress-caption">{Math.round(foodProgress)}% of daily goal</p>
           </section>
 
           <section className="content-card">
@@ -705,19 +1006,17 @@ function App() {
                 <p className="eyebrow">DAILY OVERVIEW</p>
                 <h2>Today's activity</h2>
               </div>
-
               <button
                 className="text-button"
                 onClick={() => {
                   setSelectedDate(today)
-                  setVisibleMonth(new Date())
+                  setVisibleMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
                   setActiveTab('calendar')
                 }}
               >
                 View calendar →
               </button>
             </div>
-
             {renderDailySummary(todayActivities)}
           </section>
 
@@ -727,62 +1026,34 @@ function App() {
                 <p className="eyebrow">QUICK ACTIONS</p>
                 <h2>Log an activity</h2>
               </div>
+              <button
+                className="text-button"
+                onClick={() => openActivityLogger()}
+              >
+                Manual entry +
+              </button>
             </div>
 
             <div className="action-grid">
-              <button
-                className="action-button pee-action"
-                onClick={() => logActivity('pee')}
-              >
-                <span>💧</span>
-                <strong>Pee</strong>
-                <small>Log pee</small>
+              <button className="action-button pee-action" onClick={() => logActivity('pee')}>
+                <span>💧</span><strong>Pee</strong><small>Log pee</small>
               </button>
-
-              <button
-                className="action-button poop-action"
-                onClick={() => logActivity('poop')}
-              >
-                <span>💩</span>
-                <strong>Poop</strong>
-                <small>Log poop</small>
+              <button className="action-button poop-action" onClick={() => logActivity('poop')}>
+                <span>💩</span><strong>Poop</strong><small>Log poop</small>
               </button>
-
-              <button
-                className="action-button meal-action"
-                onClick={() => setShowMealInput(!showMealInput)}
-              >
-                <span>🍽️</span>
-                <strong>Food</strong>
-                <small>Add a meal</small>
+              <button className="action-button meal-action" onClick={() => setShowMealInput(!showMealInput)}>
+                <span>🍽️</span><strong>Food</strong><small>Add a meal</small>
               </button>
-
-              <button
-                className="action-button water-action"
-                onClick={() => setShowWaterInput(!showWaterInput)}
-              >
-                <span>🚰</span>
-                <strong>Water</strong>
-                <small>Log water</small>
+              <button className="action-button water-action" onClick={() => setShowWaterInput(!showWaterInput)}>
+                <span>🚰</span><strong>Water</strong><small>Log water</small>
               </button>
-
               <button
                 className="action-button walk-action"
-                onClick={() =>
-                  walkStarted === null
-                    ? setWalkStarted(Date.now())
-                    : finishWalk()
-                }
+                onClick={() => walkStarted === null ? setWalkStarted(Date.now()) : finishWalk()}
               >
                 <span>🐕</span>
-                <strong>
-                  {walkStarted === null ? 'Walk' : 'Finish walk'}
-                </strong>
-                <small>
-                  {walkStarted === null
-                    ? 'Start a walk'
-                    : 'Save duration'}
-                </small>
+                <strong>{walkStarted === null ? 'Walk' : 'Finish walk'}</strong>
+                <small>{walkStarted === null ? 'Start a walk' : 'Save duration'}</small>
               </button>
             </div>
 
@@ -796,10 +1067,7 @@ function App() {
             {showMealInput && (
               <form
                 className="inline-form"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  logMeal()
-                }}
+                onSubmit={(event) => { event.preventDefault(); logMeal() }}
               >
                 <label htmlFor="meal-grams">Food amount (grams)</label>
                 <div className="form-controls">
@@ -811,16 +1079,8 @@ function App() {
                     onChange={(event) => setMealGrams(event.target.value)}
                     required
                   />
-                  <button type="submit" className="primary-button">
-                    Save meal
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => setShowMealInput(false)}
-                  >
-                    Cancel
-                  </button>
+                  <button type="submit" className="primary-button">Save meal</button>
+                  <button type="button" className="secondary-button" onClick={() => setShowMealInput(false)}>Cancel</button>
                 </div>
               </form>
             )}
@@ -828,10 +1088,7 @@ function App() {
             {showWaterInput && (
               <form
                 className="inline-form"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  logWater()
-                }}
+                onSubmit={(event) => { event.preventDefault(); logWater() }}
               >
                 <label htmlFor="water-ml">Water amount (ml)</label>
                 <div className="form-controls">
@@ -843,18 +1100,61 @@ function App() {
                     onChange={(event) => setWaterMl(event.target.value)}
                     required
                   />
-                  <button type="submit" className="primary-button">
-                    Save water
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => setShowWaterInput(false)}
-                  >
-                    Cancel
-                  </button>
+                  <button type="submit" className="primary-button">Save water</button>
+                  <button type="button" className="secondary-button" onClick={() => setShowWaterInput(false)}>Cancel</button>
                 </div>
               </form>
+            )}
+          </section>
+
+          <section className="content-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">MEDICAL RECORDS</p>
+                <h2>Soli's medical reports 🩺</h2>
+              </div>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setMedicalDate(dateKey(new Date()))
+                  setShowMedicalModal(true)
+                }}
+              >
+                Add report +
+              </button>
+            </div>
+
+            {medicalReports.length === 0 ? (
+              <p className="empty-state">
+                No medical reports saved yet. Use “Add report” to keep vet visits,
+                medications and other health notes in one place.
+              </p>
+            ) : (
+              <div className="medical-report-list">
+                {[...medicalReports]
+                  .sort((a, b) => b.date.localeCompare(a.date))
+                  .slice(0, 5)
+                  .map((report) => (
+                    <article className="medical-report-row" key={report.id}>
+                      <div className="medical-report-icon">🩺</div>
+                      <div className="medical-report-info">
+                        <h3>{report.title}</h3>
+                        <p>
+                          {report.category} · {formatDate(report.date)} · Logged by {report.person}
+                        </p>
+                        {report.notes && <p className="medical-report-notes">{report.notes}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        className="delete-report-button"
+                        onClick={() => deleteMedicalReport(report)}
+                        aria-label={`Delete ${report.title}`}
+                      >
+                        🗑️
+                      </button>
+                    </article>
+                  ))}
+              </div>
             )}
           </section>
 
@@ -864,19 +1164,12 @@ function App() {
                 <p className="eyebrow">LATEST ENTRIES</p>
                 <h2>Recent activity</h2>
               </div>
-
-              <button
-                className="text-button"
-                onClick={() => setActiveTab('history')}
-              >
+              <button className="text-button" onClick={() => setActiveTab('history')}>
                 See all →
               </button>
             </div>
-
             {activities.length === 0 ? (
-              <p className="empty-state">
-                No activities logged yet. Start with a quick action above!
-              </p>
+              <p className="empty-state">No activities logged yet. Start with a quick action above!</p>
             ) : (
               <div className="activity-list">
                 {sortedAllActivities.slice(0, 5).map(renderActivityRow)}
@@ -892,29 +1185,15 @@ function App() {
             <div>
               <p className="eyebrow">EXPLORE THE PAST</p>
               <h2>Activity calendar</h2>
-              <p className="muted">
-                Select any date to see Soli's daily totals.
-              </p>
+              <p className="muted">Select any date to see Soli's daily totals.</p>
             </div>
           </div>
 
           <section className="content-card calendar-card">
             <div className="calendar-heading">
-              <button
-                className="calendar-nav"
-                onClick={() => changeMonth(-1)}
-                aria-label="Previous month"
-              >
-                ←
-              </button>
+              <button className="calendar-nav" onClick={() => changeMonth(-1)} aria-label="Previous month">←</button>
               <h2>{monthYear}</h2>
-              <button
-                className="calendar-nav"
-                onClick={() => changeMonth(1)}
-                aria-label="Next month"
-              >
-                →
-              </button>
+              <button className="calendar-nav" onClick={() => changeMonth(1)} aria-label="Next month">→</button>
             </div>
 
             <button
@@ -922,43 +1201,27 @@ function App() {
               onClick={() => {
                 const now = new Date()
                 setSelectedDate(dateKey(now))
-                setVisibleMonth(
-                  new Date(now.getFullYear(), now.getMonth(), 1),
-                )
+                setVisibleMonth(new Date(now.getFullYear(), now.getMonth(), 1))
               }}
             >
               Go to today
             </button>
 
             <div className="calendar-grid">
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(
-                (day) => (
-                  <div className="calendar-weekday" key={day}>
-                    {day}
-                  </div>
-                ),
-              )}
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+                <div className="calendar-weekday" key={day}>{day}</div>
+              ))}
 
               {calendarCells.map((day, index) => {
                 if (day === null) {
-                  return (
-                    <div
-                      className="calendar-empty"
-                      key={`empty-${index}`}
-                    />
-                  )
+                  return <div className="calendar-empty" key={`empty-${index}`} />
                 }
 
-                const date = new Date(
-                  visibleMonth.getFullYear(),
-                  visibleMonth.getMonth(),
-                  day,
-                )
+                const date = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), day)
                 const key = dateKey(date)
                 const hasActivities = activities.some(
                   (activity) => dateKey(new Date(activity.time)) === key,
                 )
-
                 const isSelected = selectedDate === key
                 const isToday = today === key
 
@@ -969,9 +1232,7 @@ function App() {
                       isSelected ? 'selected' : '',
                       isToday ? 'is-today' : '',
                       hasActivities ? 'has-activities' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
+                    ].filter(Boolean).join(' ')}
                     key={key}
                     onClick={() => chooseDay(day)}
                     aria-pressed={isSelected}
@@ -999,19 +1260,11 @@ function App() {
             </div>
 
             <div className="totals-grid">
-              {(
-                ['pee', 'poop', 'meal', 'water', 'walk'] as ActivityType[]
-              ).map((type) => (
+              {(['pee', 'poop', 'meal', 'water', 'walk'] as ActivityType[]).map((type) => (
                 <article className="total-card" key={type}>
-                  <span className="total-icon">
-                    {ACTIVITY_INFO[type].icon}
-                  </span>
-                  <span className="total-label">
-                    {ACTIVITY_INFO[type].label}
-                  </span>
-                  <strong>
-                    {getTotalLabel(type, selectedActivities)}
-                  </strong>
+                  <span className="total-icon">{ACTIVITY_INFO[type].icon}</span>
+                  <span className="total-label">{ACTIVITY_INFO[type].label}</span>
+                  <strong>{getTotalLabel(type, selectedActivities)}</strong>
                 </article>
               ))}
             </div>
@@ -1020,37 +1273,16 @@ function App() {
               <div className="selected-food-goal">
                 <div className="food-goal-top">
                   <span>🍽️ Daily food goal</span>
-                  <strong>
-                    {getTotal('meal', selectedActivities)} / {FOOD_GOAL} g
-                  </strong>
+                  <strong>{getTotal('meal', selectedActivities)} / {FOOD_GOAL} g</strong>
                 </div>
                 <div className="progress-track">
                   <div
                     className="progress-fill"
                     style={{
-                      width: `${Math.min(
-                        100,
-                        (getTotal('meal', selectedActivities) / FOOD_GOAL) *
-                          100,
-                      )}%`,
+                      width: `${Math.min(100, (getTotal('meal', selectedActivities) / FOOD_GOAL) * 100)}%`,
                     }}
                   />
                 </div>
-              </div>
-            )}
-
-            <div className="section-subheading">
-              <h3>Entries for this day</h3>
-              <span>{selectedActivities.length} entries</span>
-            </div>
-
-            {sortedSelectedActivities.length === 0 ? (
-              <p className="empty-state">
-                No activities recorded for this date.
-              </p>
-            ) : (
-              <div className="activity-list">
-                {sortedSelectedActivities.map(renderActivityRow)}
               </div>
             )}
           </section>
@@ -1063,9 +1295,7 @@ function App() {
             <div>
               <p className="eyebrow">EVERYTHING IN ONE PLACE</p>
               <h2>Activity history</h2>
-              <p className="muted">
-                All of Soli's recorded activities, newest first.
-              </p>
+              <p className="muted">All of Soli's recorded activities, newest first.</p>
             </div>
           </div>
 
@@ -1076,18 +1306,13 @@ function App() {
                 <p className="muted">{activities.length} total entries</p>
               </div>
             </div>
-
             {sortedAllActivities.length === 0 ? (
-              <p className="empty-state">
-                Nothing here yet. Activities you log will appear here.
-              </p>
+              <p className="empty-state">Nothing here yet. Activities you log will appear here.</p>
             ) : (
               <div className="activity-list">
                 {sortedAllActivities.map((activity) => (
                   <div key={activity.id}>
-                    <p className="history-date">
-                      {formatDate(dateKey(new Date(activity.time)))}
-                    </p>
+                    <p className="history-date">{formatDate(dateKey(new Date(activity.time)))}</p>
                     {renderActivityRow(activity)}
                   </div>
                 ))}
@@ -1103,22 +1328,15 @@ function App() {
             <div>
               <p className="eyebrow">SOLI'S PERSONAL ALBUM</p>
               <h2>Photo gallery 📸</h2>
-              <p className="muted">
-                Keep your favorite moments together.
-              </p>
+              <p className="muted">Keep your favorite moments together.</p>
             </div>
           </div>
 
           <section className="content-card photo-upload-card">
             <div className="photo-upload-icon">🐶</div>
             <h3>Add photos of Soli</h3>
-            <p className="muted">
-              Choose one or more images from your device.
-            </p>
-
-            <label
-              className={`upload-button ${uploading ? 'uploading' : ''}`}
-            >
+            <p className="muted">Choose one or more images from your device.</p>
+            <label className={`upload-button ${uploading ? 'uploading' : ''}`}>
               <input
                 type="file"
                 accept="image/*"
@@ -1129,17 +1347,10 @@ function App() {
               <span aria-hidden="true">＋</span>
               {uploading ? 'Uploading photos…' : 'Choose photos'}
             </label>
-
-            <p className="storage-note">
-              Photos are saved in this browser on this device.
-            </p>
+            <p className="storage-note">Photos are saved in this browser on this device.</p>
           </section>
 
-          {photoError && (
-            <div className="photo-error" role="alert">
-              {photoError}
-            </div>
-          )}
+          {photoError && <div className="photo-error" role="alert">{photoError}</div>}
 
           <section className="content-card">
             <div className="section-heading">
@@ -1158,23 +1369,191 @@ function App() {
               <div className="empty-photos">
                 <div>📷</div>
                 <h3>Your gallery is waiting</h3>
-                <p>
-                  Upload your first photo of Soli and it will appear here.
-                </p>
+                <p>Upload your first photo of Soli and it will appear here.</p>
               </div>
             ) : (
               <div className="photo-grid">
                 {photos.map((photo) => (
-                  <PhotoCard
-                    key={photo.id}
-                    photo={photo}
-                    onDelete={deletePhoto}
-                  />
+                  <PhotoCard key={photo.id} photo={photo} onDelete={deletePhoto} />
                 ))}
               </div>
             )}
           </section>
         </section>
+      )}
+
+      {/* Manual activity dialog */}
+      {showActivityModal && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowActivityModal(false)
+        }}>
+          <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="activity-modal-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">SOLI'S CARE LOG</p>
+                <h2 id="activity-modal-title">Log an activity</h2>
+              </div>
+              <button className="modal-close" type="button" onClick={() => setShowActivityModal(false)} aria-label="Close">×</button>
+            </div>
+
+            <form className="modal-form" onSubmit={saveManualActivity}>
+              <label>
+                Activity type
+                <select
+                  value={manualType}
+                  onChange={(event) => {
+                    const nextType = event.target.value as ActivityType
+                    setManualType(nextType)
+                    if (nextType === 'meal') setManualAmount('125')
+                    if (nextType === 'water') setManualAmount('250')
+                  }}
+                >
+                  <option value="pee">💧 Pee</option>
+                  <option value="poop">💩 Poop</option>
+                  <option value="meal">🍽️ Food / meal</option>
+                  <option value="water">🚰 Water</option>
+                  <option value="walk">🐕 Walk</option>
+                </select>
+              </label>
+
+              <label>
+                Date and time
+                <input
+                  type="datetime-local"
+                  value={manualTime}
+                  onChange={(event) => {
+                    setManualTime(event.target.value)
+                    setManualMealSlot(getMealSlotForTime(new Date(event.target.value).getTime()))
+                  }}
+                  required
+                />
+              </label>
+
+              {manualType === 'meal' && (
+                <>
+                  <label>
+                    Meal
+                    <select value={manualMealSlot} onChange={(event) => setManualMealSlot(event.target.value as MealSlot)}>
+                      <option value="breakfast">Breakfast</option>
+                      <option value="lunch">Lunch</option>
+                      <option value="dinner">Dinner</option>
+                    </select>
+                  </label>
+                  <label>
+                    Food amount (grams)
+                    <input type="number" min="1" value={manualAmount} onChange={(event) => setManualAmount(event.target.value)} required />
+                  </label>
+                </>
+              )}
+
+              {manualType === 'water' && (
+                <label>
+                  Water amount (ml)
+                  <input type="number" min="1" value={manualAmount} onChange={(event) => setManualAmount(event.target.value)} required />
+                </label>
+              )}
+
+              {manualType === 'walk' && (
+                <label>
+                  Walk duration (minutes)
+                  <input type="number" min="1" value={manualDuration} onChange={(event) => setManualDuration(event.target.value)} required />
+                </label>
+              )}
+
+              {(manualType === 'pee' || manualType === 'poop') && (
+                <label>
+                  Notes (optional)
+                  <textarea
+                    rows={3}
+                    value={manualNotes}
+                    onChange={(event) => setManualNotes(event.target.value)}
+                    placeholder={manualType === 'pee' ? 'e.g. normal amount, unusual color…' : 'e.g. consistency, color, anything unusual…'}
+                  />
+                </label>
+              )}
+
+              {manualType !== 'pee' && manualType !== 'poop' && (
+                <label>
+                  Notes (optional)
+                  <textarea
+                    rows={3}
+                    value={manualNotes}
+                    onChange={(event) => setManualNotes(event.target.value)}
+                    placeholder="Add any details…"
+                  />
+                </label>
+              )}
+
+              <p className="modal-helper">Logged by: <strong>{person}</strong></p>
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" onClick={() => setShowActivityModal(false)}>Cancel</button>
+                <button type="submit" className="primary-button">Save activity</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {/* Medical report dialog */}
+      {showMedicalModal && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowMedicalModal(false)
+        }}>
+          <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="medical-modal-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">HEALTH RECORDS</p>
+                <h2 id="medical-modal-title">Log a medical report</h2>
+              </div>
+              <button className="modal-close" type="button" onClick={() => setShowMedicalModal(false)} aria-label="Close">×</button>
+            </div>
+
+            <form className="modal-form" onSubmit={saveMedicalReport}>
+              <label>
+                Report title
+                <input
+                  value={medicalTitle}
+                  onChange={(event) => setMedicalTitle(event.target.value)}
+                  placeholder="e.g. Annual vet check-up"
+                  required
+                />
+              </label>
+
+              <label>
+                Report type
+                <select value={medicalCategory} onChange={(event) => setMedicalCategory(event.target.value)}>
+                  <option>Vet visit</option>
+                  <option>Medication</option>
+                  <option>Vaccination</option>
+                  <option>Test results</option>
+                  <option>Allergy</option>
+                  <option>Other</option>
+                </select>
+              </label>
+
+              <label>
+                Date
+                <input type="date" value={medicalDate} onChange={(event) => setMedicalDate(event.target.value)} required />
+              </label>
+
+              <label>
+                Notes / details
+                <textarea
+                  rows={4}
+                  value={medicalNotes}
+                  onChange={(event) => setMedicalNotes(event.target.value)}
+                  placeholder="Vet instructions, medication dosage, follow-up date…"
+                />
+              </label>
+
+              <p className="modal-helper">This report will be saved locally in this browser. Logged by: <strong>{person}</strong></p>
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" onClick={() => setShowMedicalModal(false)}>Cancel</button>
+                <button type="submit" className="primary-button">Save report</button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
 
       <footer className="app-footer">Made with ❤️ for Soli</footer>

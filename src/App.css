@@ -1073,3 +1073,477 @@ select:focus-visible {
     aspect-ratio: 5 / 3;
   }
 }
+/* Header and plus menu */
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.plus-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.plus-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: #477f50;
+  color: white;
+  font-size: 29px;
+  line-height: 1;
+  box-shadow: 0 3px 9px rgb(40 90 50 / 14%);
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.plus-button:hover {
+  background: #32673f;
+  transform: translateY(-1px);
+}
+
+.plus-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 235px;
+  padding: 7px;
+  border: 1px solid #e5ebe2;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 35px rgb(35 55 35 / 14%);
+}
+
+.plus-dropdown button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #35453a;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.plus-dropdown button:hover {
+  background: #f0f6ed;
+}
+
+.plus-dropdown button span {
+  font-size: 19px;
+}
+
+/* Meal reminders */
+
+.meal-reminders-card {
+  padding: 22px;
+  border: 1px solid #f0dfbd;
+  border-radius: 19px;
+  background: linear-gradient(135deg, #fff8e9, #fffdf7);
+}
+
+.meal-reminders-card .section-heading {
+  margin-bottom: 12px;
+}
+
+.meal-reminders-card .section-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.meal-reminder-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.meal-reminder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid #f0e8d6;
+}
+
+.meal-reminder-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.meal-reminder-row strong {
+  color: #4d493b;
+  font-size: 14px;
+}
+
+.meal-reminder-row p {
+  margin: 5px 0 0;
+  color: #8d846e;
+  font-size: 12px;
+}
+
+.meal-reminder-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.meal-reminder-actions .text-button {
+  color: #8b816c;
+}
+
+/* End-of-day celebration */
+
+.celebration-card {
+  position: relative;
+  overflow: hidden;
+  padding: 25px;
+  border: 1px solid #d9e9d6;
+  border-radius: 19px;
+  background: linear-gradient(135deg, #eaf6e8, #fff8e7);
+  text-align: center;
+  animation: celebration-appear 450ms ease both;
+}
+
+.celebration-card h2 {
+  margin: 8px 0;
+  color: #315f3d;
+  font-size: clamp(22px, 4vw, 29px);
+  letter-spacing: -0.7px;
+}
+
+.celebration-card > p:last-child {
+  margin: 0;
+  color: #657968;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.celebration-confetti {
+  margin-bottom: 12px;
+  font-size: 25px;
+  letter-spacing: 5px;
+  animation: confetti-bounce 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes celebration-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes confetti-bounce {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-4px);
+  }
+}
+
+/* Medical reports */
+
+.medical-report-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.medical-report-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 15px 0;
+  border-bottom: 1px solid #eff1ed;
+}
+
+.medical-report-row:last-child {
+  border-bottom: 0;
+}
+
+.medical-report-icon {
+  display: grid;
+  flex: 0 0 42px;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: #edf1ff;
+  font-size: 21px;
+}
+
+.medical-report-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.medical-report-info h3 {
+  margin: 1px 0 5px;
+  color: #34443a;
+  font-size: 14px;
+}
+
+.medical-report-info p {
+  margin: 0;
+  color: #89928b;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.medical-report-info .medical-report-notes {
+  margin-top: 7px;
+  color: #59685c;
+  white-space: pre-wrap;
+}
+
+.delete-report-button {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #f0dedb;
+  border-radius: 9px;
+  background: #fff8f7;
+  font-size: 14px;
+}
+
+.delete-report-button:hover {
+  background: #ffefed;
+}
+
+/* Dialogs */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 22px;
+  background: rgb(30 43 33 / 45%);
+  backdrop-filter: blur(3px);
+}
+
+.modal-card {
+  width: min(100%, 510px);
+  max-height: min(90vh, 850px);
+  overflow-y: auto;
+  padding: 25px;
+  border: 1px solid #e6ece4;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 70px rgb(20 35 20 / 22%);
+  animation: celebration-appear 180ms ease both;
+}
+
+.modal-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.modal-heading h2 {
+  margin: 4px 0 0;
+  color: #2f4034;
+  font-size: 24px;
+  letter-spacing: -0.7px;
+}
+
+.modal-close {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e7ece5;
+  border-radius: 10px;
+  background: #f8faf7;
+  color: #667368;
+  font-size: 25px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  background: #edf4ea;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #59685c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.modal-form input,
+.modal-form select,
+.modal-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #dfe7dc;
+  border-radius: 10px;
+  background: #fff;
+  color: #27332d;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.modal-form textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.modal-form input:focus,
+.modal-form select:focus,
+.modal-form textarea:focus {
+  border-color: #8bb693;
+  outline: 3px solid rgb(156 201 170 / 25%);
+}
+
+.modal-helper {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: #f4f7f1;
+  color: #758078;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.modal-helper strong {
+  color: #3e6046;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding-top: 4px;
+}
+
+.modal-actions button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+/* Responsive adjustments for the new components */
+
+@media (max-width: 700px) {
+  .header-left {
+    align-items: flex-start;
+    gap: 9px;
+  }
+
+  .plus-button {
+    width: 39px;
+    height: 39px;
+    border-radius: 12px;
+    font-size: 26px;
+  }
+
+  .plus-dropdown {
+    width: 220px;
+  }
+
+  .meal-reminders-card {
+    padding: 17px;
+    border-radius: 16px;
+  }
+
+  .meal-reminder-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .meal-reminder-actions {
+    justify-content: flex-start;
+  }
+
+  .celebration-card {
+    padding: 20px 16px;
+  }
+
+  .medical-report-row {
+    gap: 10px;
+  }
+
+  .medical-report-icon {
+    flex-basis: 37px;
+    width: 37px;
+    height: 37px;
+    border-radius: 11px;
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .modal-card {
+    max-height: calc(100vh - 24px);
+    padding: 19px;
+    border-radius: 16px;
+  }
+
+  .modal-heading h2 {
+    font-size: 21px;
+  }
+}
+
+@media (max-width: 380px) {
+  .header-left {
+    gap: 7px;
+  }
+
+  .plus-button {
+    width: 35px;
+    height: 35px;
+  }
+
+  .meal-reminder-actions {
+    gap: 8px;
+  }
+
+  .modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .modal-actions button {
+    width: 100%;
+  }
+}
